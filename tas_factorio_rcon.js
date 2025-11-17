@@ -40,6 +40,7 @@ const allowedBaseLabels = new Set([
     'electric_furnaces',
     'electric_mining_drills',
     'boilers',
+    'assemblers',
 ]);
 const UNIT_CNT_REGEX = /^(.*)_([0-9]+)$/;
 
@@ -186,13 +187,14 @@ async function handleSnapshot(raw) {
 
         for (const entity of target.entities) {
             const unit = entity.unit_number || entity.unit || 'unknown';
-            const label = resolveLabel(baseLabel, entity);
+            const { label, recipe } = deriveLabelAndRecipe(baseLabel, entity);
 
             const topic = `${sendDataTopicBase}/${label}/${label}_${unit}`;
 
             const payloadObj = {
                 tick,
                 label,
+                recipe: recipe || null,
                 entity_name: entity.name,
                 ...entity,
             };
@@ -211,22 +213,39 @@ async function handleSnapshot(raw) {
     }
 }
 
-function resolveLabel(label, entity) {
+function deriveLabelAndRecipe(label, entity) {
     if (!label) {
-        return 'unknown';
+        return { label: 'unknown', recipe: null };
     }
 
     if (label.includes('assemblers')) {
-        const recipe = entity.recipe || entity.recipe_name || entity.current_recipe;
-        if (recipe) {
-            const normalized = recipe.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '');
-            if (normalized.length > 0) {
-                return `${normalized}_assemblers`;
-            }
+        const recipeValue = entity.recipe || entity.recipe_name || entity.current_recipe || entity.current_recipe_name || null;
+        const normalized = normalizeRecipe(recipeValue);
+        if (normalized) {
+            return { label: `${normalized}_assemblers`, recipe: recipeValue };
         }
+        return { label, recipe: recipeValue };
     }
 
-    return label;
+    if (label.includes('electric_furnaces')) {
+        const recipeValue = entity.recipe || entity.recipe_name || entity.current_recipe || entity.current_recipe_name || null;
+        const normalized = normalizeRecipe(recipeValue);
+        if (normalized) {
+            return { label: `${normalized}_electric_furnaces`, recipe: recipeValue };
+        }
+        return { label, recipe: recipeValue };
+    }
+
+    return { label, recipe: null };
+}
+
+function normalizeRecipe(recipe) {
+    if (!recipe || typeof recipe !== 'string') {
+        return null;
+    }
+
+    const normalized = recipe.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '');
+    return normalized.length > 0 ? normalized : null;
 }
 
 function isLabelAllowed(label) {
@@ -239,6 +258,10 @@ function isLabelAllowed(label) {
     }
 
     if (label.endsWith('_assemblers')) {
+        return true;
+    }
+
+    if (label.endsWith('_electric_furnaces')) {
         return true;
     }
 
